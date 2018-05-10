@@ -7,6 +7,9 @@ elasticsearch:
   sniff: false
   indexMappings:
     chat: '{ "mappings": { "message":{}}}'
+cassandra:
+  hosts: "localhost:4042"
+  keyspace: "chat"
 mongo:
   host: "mongodb://localhost:27017"
   allow_anonymous: false
