@@ -8,11 +8,16 @@ elasticsearch:
   indexMappings:
     chat: '{ "mappings": { "message":{}}}'
 cassandra:
-  hosts: "localhost:4042"
+  hosts: "localhost:9042"
   keyspace: "chat"
+  bucket:
+    sizeInDays: 1
+    startDate: "01-01-2018"
+  messages:
+    limit: 10
 mongo:
   host: "mongodb://localhost:27017"
-  allow_anonymous: false
+  allow_anonymous: true
   database: "mqtt"
 logger:
   level: "debug"

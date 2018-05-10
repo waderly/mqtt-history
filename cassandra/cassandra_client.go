@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	cassdatastore "git.topfreegames.com/topfreegames/adspot/cassandra"
 	"github.com/gocql/gocql"
-	"github.com/sirupsen/logrus"
+	"github.com/op/go-logging"
 	"github.com/spf13/viper"
 	"github.com/topfreegames/extensions/cassandra"
 	"github.com/topfreegames/extensions/middleware"
+	"github.com/topfreegames/mqtt-history/models"
+
+	cassandrainterfaces "github.com/topfreegames/extensions/cassandra/interfaces"
 )
 
-func sendMetrics(ctx context.Context, mr middleware.MetricsReporter, keyspace string, elapsed time.Duration, logger logrus.FieldLogger) {
-	logger = logger.WithField("operation", "cassandra.sendMetrics")
-
-	logger.Debug("sending metrics do statsd")
+func sendMetrics(ctx context.Context, mr middleware.MetricsReporter, keyspace string, elapsed time.Duration, logger *logging.Logger) {
+	logger.Debug("[sendMetrics] sending metrics do statsd")
 
 	if mr == nil || ctx == nil {
 		if mr == nil {
@@ -36,40 +36,45 @@ func sendMetrics(ctx context.Context, mr middleware.MetricsReporter, keyspace st
 	logger.Debug("sending metrics to statsd")
 
 	if err := mr.Timing("cassandraQuery", elapsed, tags...); err != nil {
-		logger.WithError(err).Error("failed to send metric to statsd")
+		logger.Errorf("[sendMetrics] failed to send metric to statsd: %s", err.Error())
 	}
 }
 
 // QueryObserver implements gocql.QueryObserver
 type QueryObserver struct {
-	logger          logrus.FieldLogger
+	logger          *logging.Logger
 	MetricsReporter middleware.MetricsReporter
 }
 
 // ObserveQuery sends timing metrics to dogstatsd on every query
 func (o *QueryObserver) ObserveQuery(ctx context.Context, q gocql.ObservedQuery) {
-	sendMetrics(o.MetricsReporter, ctx, q.Keyspace, q.End.Sub(q.Start), o.logger)
+	sendMetrics(ctx, o.MetricsReporter, q.Keyspace, q.End.Sub(q.Start), o.logger)
 }
 
 // BatchObserver implements gocql.BatchObserver
 type BatchObserver struct {
-	logger          logrus.FieldLogger
+	logger          *logging.Logger
 	MetricsReporter middleware.MetricsReporter
 }
 
 // ObserveBatch sends timing metrics to dogstatsd on every batch query
 func (o *BatchObserver) ObserveBatch(ctx context.Context, b gocql.ObservedBatch) {
-	sendMetrics(o.MetricsReporter, ctx, b.Keyspace, b.End.Sub(b.Start), o.logger)
+	sendMetrics(ctx, o.MetricsReporter, b.Keyspace, b.End.Sub(b.Start), o.logger)
+}
+
+// Store is the access layer and contains the cassandra session.
+// Implements DataStore
+type Store struct {
+	DBSession cassandrainterfaces.Session
+	bucket    *models.Bucket
 }
 
 // GetCassandra connects on Cassandra and returns the client with a session
 func GetCassandra(
-	logger logrus.FieldLogger,
+	logger *logging.Logger,
 	config *viper.Viper,
 	mr middleware.MetricsReporter,
-) (cassdatastore.Datastore, error) {
-	l := logger.WithField("operation", "cassandra.GetCassandra")
-
+) (DataStore, error) {
 	params := &cassandra.ClientParams{
 		ClusterConfig: cassandra.ClusterConfig{
 			Prefix:        "cassandra",
@@ -81,12 +86,22 @@ func GetCassandra(
 
 	client, err := cassandra.NewClient(params)
 	if err != nil {
-		l.WithError(err).Error("connection to database failed")
+		logger.Errorf("[GetCassandra] connection to database failed: %s", err.Error())
 		return nil, err
 	}
 
-	l.Info("successfully connected to cassandra")
-	store := &cassdatastore.Store{DBSession: client.Session}
+	logger.Info("successfully connected to cassandra")
+
+	bucket, err := models.NewBucket(config)
+	if err != nil {
+		logger.Errorf("[GetCassandra] failed to configure bucket: %s", err.Error())
+		return nil, err
+	}
+
+	store := &Store{
+		DBSession: client.Session,
+		bucket:    bucket,
+	}
 
 	return store, nil
 }

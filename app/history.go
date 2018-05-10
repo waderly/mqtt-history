@@ -13,15 +13,9 @@ import (
 	"github.com/getsentry/raven-go"
 	"github.com/labstack/echo"
 	"github.com/topfreegames/mqtt-history/logger"
+	"github.com/topfreegames/mqtt-history/models"
 	"gopkg.in/olivere/elastic.v5"
 )
-
-// Message represents a chat message
-type Message struct {
-	Timestamp time.Time `json:"timestamp"`
-	Payload   string    `json:"payload"`
-	Topic     string    `json:"topic"`
-}
 
 // HistoryHandler is the handler responsible for sending the rooms history to the player
 func HistoryHandler(app *App) func(c echo.Context) error {
@@ -48,26 +42,9 @@ func HistoryHandler(app *App) func(c echo.Context) error {
 			return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
 		}
 
-		boolQuery := elastic.NewBoolQuery()
-		termQuery := elastic.NewTermQuery("topic", topic)
-		boolQuery.Must(termQuery)
+		messages := app.Cassandra.SelectMessagesInBucket(
+			c.StdContext(), topic, from, limit)
 
-		var searchResults *elastic.SearchResult
-		err = WithSegment("elasticsearch", c, func() error {
-			searchResults, err = DoESQuery(c.StdContext(), app.NumberOfDaysToSearch, boolQuery, from, limit)
-			return err
-		})
-
-		if err != nil {
-			return err
-		}
-		messages := []Message{}
-		var ttyp Message
-		for _, item := range searchResults.Each(reflect.TypeOf(ttyp)) {
-			if t, ok := item.(Message); ok {
-				messages = append(messages, t)
-			}
-		}
 		return c.JSON(http.StatusOK, messages)
 	}
 }
@@ -134,10 +111,10 @@ func HistorySinceHandler(app *App) func(c echo.Context) error {
 				return err
 			}
 
-			messages := []Message{}
-			var ttyp Message
+			messages := []models.Message{}
+			var ttyp models.Message
 			for _, item := range searchResults.Each(reflect.TypeOf(ttyp)) {
-				if t, ok := item.(Message); ok {
+				if t, ok := item.(models.Message); ok {
 					messages = append(messages, t)
 				}
 			}

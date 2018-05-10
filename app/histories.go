@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo"
 	"github.com/topfreegames/mqtt-history/logger"
+	"github.com/topfreegames/mqtt-history/models"
 	"gopkg.in/olivere/elastic.v5"
 )
 
@@ -49,10 +50,10 @@ func HistoriesHandler(app *App) func(c echo.Context) error {
 			if err != nil {
 				return err
 			}
-			messages := []Message{}
-			var ttyp Message
+			messages := []models.Message{}
+			var ttyp models.Message
 			for _, item := range searchResults.Each(reflect.TypeOf(ttyp)) {
-				if t, ok := item.(Message); ok {
+				if t, ok := item.(models.Message); ok {
 					messages = append(messages, t)
 				}
 			}
