@@ -32,12 +32,6 @@ func NewBucket(config *viper.Viper) (*Bucket, error) {
 // Get returns the number of buckets (periods of time)
 // since start
 func (b *Bucket) Get(from int) int {
-	println("HENROD",
-		time.Unix(int64(from), 0).String(),
-		b.start.String(),
-		time.Unix(int64(from), 0).Sub(b.start).Hours(),
-		b.bucketSize)
-
-	diff := time.Unix(int64(from), 0).Sub(b.start).Hours()
+	diff := time.Unix(int64(from), 0).Sub(b.start).Seconds()
 	return int(diff / b.bucketSize)
 }
