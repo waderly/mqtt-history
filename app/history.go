@@ -41,32 +41,34 @@ func HistoryHandler(app *App) func(c echo.Context) error {
 			return err
 		}
 
-		logger.Logger.Debugf("user %s is asking for history for topic %s with args from=%d and limit=%d", userID, topic, from, limit)
-		if authenticated {
-			boolQuery := elastic.NewBoolQuery()
-			termQuery := elastic.NewTermQuery("topic", topic)
-			boolQuery.Must(termQuery)
-
-			var searchResults *elastic.SearchResult
-			err = WithSegment("elasticsearch", c, func() error {
-				searchResults, err = DoESQuery(c.StdContext(), app.NumberOfDaysToSearch, boolQuery, from, limit)
-				return err
-			})
-
-			if err != nil {
-				return err
-			}
-			messages := []Message{}
-			var ttyp Message
-			for _, item := range searchResults.Each(reflect.TypeOf(ttyp)) {
-				if t, ok := item.(Message); ok {
-					messages = append(messages, t)
-				}
-			}
-			return c.JSON(http.StatusOK, messages)
+		logger.Logger.Debugf(
+			"user %s is asking for history for topic %s with args from=%d and limit=%d",
+			userID, topic, from, limit)
+		if !authenticated {
+			return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
 		}
 
-		return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
+		boolQuery := elastic.NewBoolQuery()
+		termQuery := elastic.NewTermQuery("topic", topic)
+		boolQuery.Must(termQuery)
+
+		var searchResults *elastic.SearchResult
+		err = WithSegment("elasticsearch", c, func() error {
+			searchResults, err = DoESQuery(c.StdContext(), app.NumberOfDaysToSearch, boolQuery, from, limit)
+			return err
+		})
+
+		if err != nil {
+			return err
+		}
+		messages := []Message{}
+		var ttyp Message
+		for _, item := range searchResults.Each(reflect.TypeOf(ttyp)) {
+			if t, ok := item.(Message); ok {
+				messages = append(messages, t)
+			}
+		}
+		return c.JSON(http.StatusOK, messages)
 	}
 }
 
