@@ -13,6 +13,12 @@ type DataStore interface {
 	SelectMessagesInBucket(
 		ctx context.Context, topic string, from, limit int,
 	) []*models.Message
+
+	SelectMessagesInRangeBuckets(
+		ctx context.Context,
+		topic string,
+		from, to, limit int,
+	) []*models.Message
 }
 
 // SelectMessagesInBucket gets at most limit messages on
@@ -32,9 +38,41 @@ func (s *Store) SelectMessagesInBucket(
 	messages := []*models.Message{}
 	bucket := s.bucket.Get(from)
 
-	fmt.Printf("HENROD %s %s %d", query, topic, bucket)
-
 	iter := s.DBSession.Query(query, topic, bucket).WithContext(ctx).Iter()
+	defer iter.Close()
+	for {
+		var payload, topic string
+		var timestamp time.Time
+		if !iter.Scan(&payload, &timestamp, &topic) {
+			break
+		}
+		messages = append(messages, &models.Message{
+			Timestamp: timestamp,
+			Payload:   payload,
+			Topic:     topic,
+		})
+	}
+
+	return messages
+}
+
+// SelectMessagesInRangeBuckets ...
+func (s *Store) SelectMessagesInRangeBuckets(
+	ctx context.Context,
+	topic string,
+	from, to, limit int,
+) []*models.Message {
+	messages := []*models.Message{}
+	buckets := s.bucket.Range(from, to)
+
+	query := fmt.Sprintf(`
+	SELECT payload, toTimestamp(id) as timestamp, topic
+	FROM messages 
+	WHERE topic = ? AND bucket IN ?
+	LIMIT %d
+	`, limit)
+
+	iter := s.DBSession.Query(query, topic, buckets).WithContext(ctx).Iter()
 	defer iter.Close()
 	for {
 		var payload, topic string
