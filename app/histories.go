@@ -2,14 +2,12 @@ package app
 
 import (
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo"
 	"github.com/topfreegames/mqtt-history/logger"
-	"github.com/topfreegames/mqtt-history/models"
-	"gopkg.in/olivere/elastic.v5"
 )
 
 // HistoriesHandler is the handler responsible for sending multiples rooms history to the player
@@ -28,6 +26,9 @@ func HistoriesHandler(app *App) func(c echo.Context) error {
 		if limit == 0 {
 			limit = 10
 		}
+		if from == 0 {
+			from = int(time.Now().Unix())
+		}
 
 		logger.Logger.Debugf("user %s is asking for histories for topicPrefix %s with args topics=%s from=%d and limit=%d", userID, topicPrefix, topics, from, limit)
 		authenticated, authorizedTopics, err := authenticate(c.StdContext(), app, userID, topics...)
@@ -35,30 +36,12 @@ func HistoriesHandler(app *App) func(c echo.Context) error {
 			return err
 		}
 
-		if authenticated {
-			boolQuery := elastic.NewBoolQuery()
-			topicBoolQuery := elastic.NewBoolQuery()
-			topicBoolQuery.Should(elastic.NewTermsQuery("topic", authorizedTopics...))
-			boolQuery.Must(topicBoolQuery)
-
-			var searchResults *elastic.SearchResult
-			err = WithSegment("elasticsearch", c, func() error {
-				searchResults, err = DoESQuery(c.StdContext(), app.NumberOfDaysToSearch, boolQuery, from, limit)
-				return err
-			})
-
-			if err != nil {
-				return err
-			}
-			messages := []models.Message{}
-			var ttyp models.Message
-			for _, item := range searchResults.Each(reflect.TypeOf(ttyp)) {
-				if t, ok := item.(models.Message); ok {
-					messages = append(messages, t)
-				}
-			}
-			return c.JSON(http.StatusOK, messages)
+		if !authenticated {
+			return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
 		}
-		return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
+
+		messages := app.Cassandra.SelectMessagesInTopics(c.StdContext(), authorizedTopics, int64(from), limit)
+
+		return c.JSON(http.StatusOK, messages)
 	}
 }

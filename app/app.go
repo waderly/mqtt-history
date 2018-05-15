@@ -74,7 +74,7 @@ func (app *App) Configure() {
 }
 
 func (app *App) configureCassandra() {
-	logger.Logger.Info("Starting Cassandra..")
+	logger.Logger.Infof("Connecting to Cassandra")
 	cassandra, err := cassandra.GetCassandra(
 		logger.Logger,
 		app.Config,

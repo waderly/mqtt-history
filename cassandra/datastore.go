@@ -5,20 +5,63 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/topfreegames/mqtt-history/models"
 )
 
 // DataStore is the interface with data access methods
 type DataStore interface {
 	SelectMessagesInBucket(
-		ctx context.Context, topic string, from, limit int,
+		ctx context.Context, topic string,
+		from int64,
+		qnt, limit int,
 	) []*models.Message
 
-	SelectMessagesInRangeBuckets(
+	SelectMessagesBeforeTime(
 		ctx context.Context,
 		topic string,
-		from, to, limit int,
+		from, to int64,
+		limit int,
 	) []*models.Message
+
+	SelectMessagesInTopics(
+		ctx context.Context,
+		topics []string,
+		from int64,
+		limit int,
+	) []*models.Message
+
+	InsertWithTTL(
+		ctx context.Context,
+		topic, payload string,
+		now time.Time,
+		ttl ...time.Duration,
+	) error
+}
+
+func (s *Store) exec(ctx context.Context, query string, params ...interface{}) []*models.Message {
+	messages := []*models.Message{}
+	iter := s.DBSession.Query(query, params...).WithContext(ctx).Iter()
+	defer func() {
+		err := iter.Close()
+		if err != nil {
+			println("errod", err.Error())
+		}
+	}()
+	for {
+		var payload, topic string
+		var timestamp time.Time
+		if !iter.Scan(&payload, &timestamp, &topic) {
+			break
+		}
+		messages = append(messages, &models.Message{
+			Timestamp: timestamp,
+			Payload:   payload,
+			Topic:     topic,
+		})
+	}
+
+	return messages
 }
 
 // SelectMessagesInBucket gets at most limit messages on
@@ -26,45 +69,9 @@ type DataStore interface {
 func (s *Store) SelectMessagesInBucket(
 	ctx context.Context,
 	topic string,
-	from, limit int,
+	from int64,
+	qnt, limit int,
 ) []*models.Message {
-	query := fmt.Sprintf(`
-	SELECT payload, toTimestamp(id) as timestamp, topic
-	FROM messages 
-	WHERE topic = ? AND bucket = ?
-	LIMIT %d
-	`, limit)
-
-	messages := []*models.Message{}
-	bucket := s.bucket.Get(from)
-
-	iter := s.DBSession.Query(query, topic, bucket).WithContext(ctx).Iter()
-	defer iter.Close()
-	for {
-		var payload, topic string
-		var timestamp time.Time
-		if !iter.Scan(&payload, &timestamp, &topic) {
-			break
-		}
-		messages = append(messages, &models.Message{
-			Timestamp: timestamp,
-			Payload:   payload,
-			Topic:     topic,
-		})
-	}
-
-	return messages
-}
-
-// SelectMessagesInRangeBuckets ...
-func (s *Store) SelectMessagesInRangeBuckets(
-	ctx context.Context,
-	topic string,
-	from, to, limit int,
-) []*models.Message {
-	messages := []*models.Message{}
-	buckets := s.bucket.Range(from, to)
-
 	query := fmt.Sprintf(`
 	SELECT payload, toTimestamp(id) as timestamp, topic
 	FROM messages 
@@ -72,20 +79,71 @@ func (s *Store) SelectMessagesInRangeBuckets(
 	LIMIT %d
 	`, limit)
 
-	iter := s.DBSession.Query(query, topic, buckets).WithContext(ctx).Iter()
-	defer iter.Close()
-	for {
-		var payload, topic string
-		var timestamp time.Time
-		if !iter.Scan(&payload, &timestamp, &topic) {
-			break
-		}
-		messages = append(messages, &models.Message{
-			Timestamp: timestamp,
-			Payload:   payload,
-			Topic:     topic,
-		})
+	buckets := s.bucket.GetBuckets(from, qnt)
+
+	return s.exec(ctx, query, topic, buckets)
+}
+
+// SelectMessagesBeforeTime ...
+func (s *Store) SelectMessagesBeforeTime(
+	ctx context.Context,
+	topic string,
+	from, to int64,
+	limit int,
+) []*models.Message {
+	query := fmt.Sprintf(`
+	SELECT payload, toTimestamp(id) as timestamp, topic
+	FROM messages 
+	WHERE 
+		topic = ? AND bucket IN ? 
+		AND id > ?
+	LIMIT %d
+	`, limit)
+
+	msgTime := time.Unix(to, 0)
+	buckets := s.bucket.Range(from, to)
+
+	return s.exec(ctx, query, topic, buckets, gocql.UUIDFromTime(msgTime))
+}
+
+// SelectMessagesInTopics ...
+func (s *Store) SelectMessagesInTopics(
+	ctx context.Context,
+	topics []string,
+	from int64,
+	limit int,
+) []*models.Message {
+	query := fmt.Sprintf(`
+	SELECT payload, toTimestamp(id) as timestamp, topic
+	FROM messages 
+	WHERE topic IN ? AND bucket IN ?
+	LIMIT %d
+	`, limit)
+
+	buckets := s.bucket.GetBuckets(from, 10)
+
+	return s.exec(ctx, query, topics, buckets)
+}
+
+// InsertWithTTL ...
+func (s *Store) InsertWithTTL(
+	ctx context.Context,
+	topic, payload string,
+	now time.Time,
+	ttl ...time.Duration,
+) error {
+	ttlVar := 1 * time.Minute
+	if len(ttl) > 0 {
+		ttlVar = ttl[0]
 	}
 
-	return messages
+	query := fmt.Sprintf(`
+	INSERT INTO messages(id, topic, payload, bucket)
+	VALUES(now(), ?, ?, ?)
+	USING TTL %d
+	`, int(ttlVar.Seconds()))
+
+	timestamp := now.Unix()
+	err := s.DBSession.Query(query, topic, payload, s.bucket.Get(timestamp)).Exec()
+	return err
 }

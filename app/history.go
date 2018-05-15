@@ -39,8 +39,10 @@ func HistoryHandler(app *App) func(c echo.Context) error {
 			return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
 		}
 
-		messages := app.Cassandra.SelectMessagesInBucket(
-			c.StdContext(), topic, from, limit)
+		qnt := 10
+		messages := app.Cassandra.SelectMessagesInBucket(c.StdContext(),
+			topic,
+			int64(from), qnt, limit)
 
 		return c.JSON(http.StatusOK, messages)
 	}
@@ -55,6 +57,8 @@ func HistorySinceHandler(app *App) func(c echo.Context) error {
 		from, err := strconv.Atoi(c.QueryParam("from"))
 		limit, err := strconv.Atoi(c.QueryParam("limit"))
 		since, err := strconv.ParseInt(c.QueryParam("since"), 10, 64)
+
+		fmt.Println("parsing int", c.QueryParam("since"))
 
 		now := int64(time.Now().Unix())
 		if since > now {
@@ -96,7 +100,7 @@ func HistorySinceHandler(app *App) func(c echo.Context) error {
 			return c.String(echo.ErrUnauthorized.Code, echo.ErrUnauthorized.Message)
 		}
 
-		messages := app.Cassandra.SelectMessagesInRangeBuckets(c.StdContext(), topic, int(since), from, limit)
+		messages := app.Cassandra.SelectMessagesBeforeTime(c.StdContext(), topic, since, int64(from), limit)
 
 		var resStr []byte
 		resStr, err = json.Marshal(messages)

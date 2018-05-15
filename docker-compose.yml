@@ -28,3 +28,7 @@ services:
     depends_on:
       - mosquitto
       - elasticsearch
+  mongo:
+    image: mongo:3.0.15-wheezy
+    ports:
+      - "27017:27017"

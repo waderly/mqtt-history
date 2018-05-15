@@ -31,8 +31,8 @@ func NewBucket(config *viper.Viper) (*Bucket, error) {
 
 // Get returns the number of buckets (periods of time)
 // since start
-func (b *Bucket) Get(from int) int {
-	diff := time.Unix(int64(from), 0).Sub(b.start).Seconds()
+func (b *Bucket) Get(from int64) int {
+	diff := time.Unix(from, 0).Sub(b.start).Seconds()
 
 	buckets := int(diff / b.bucketSize)
 	if buckets < 0 {
@@ -43,7 +43,7 @@ func (b *Bucket) Get(from int) int {
 }
 
 // Range returns a list of buckets starting in from and ending in since
-func (b *Bucket) Range(from, to int) []int {
+func (b *Bucket) Range(from, to int64) []int {
 	bucketFrom := b.Get(from)
 	bucketTo := b.Get(to)
 
@@ -54,5 +54,16 @@ func (b *Bucket) Range(from, to int) []int {
 		idx = idx + 1
 	}
 
+	return buckets
+}
+
+// GetBuckets returns the buckets starting with from until
+// have qnt buckets
+func (b *Bucket) GetBuckets(from int64, qnt int) []int {
+	current := b.Get(from)
+	buckets := []int{}
+	for i := 0; i < qnt && i > 0; i++ {
+		buckets = append(buckets, current-i)
+	}
 	return buckets
 }
